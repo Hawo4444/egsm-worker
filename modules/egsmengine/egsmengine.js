@@ -389,7 +389,7 @@ var DATA = {
     update: function (invalidator) {
         var oldValue = this.value;
         var newValue = this.value;
-
+        //here
         //LogManager.logModelData(this.name, this.type, this.stage, 'UPDATE START', this.value, this.sentry);
 
         //evaluate sentry
@@ -430,6 +430,17 @@ var DATA = {
                 if (this._array_dep.length > 0)
                     Array.prototype.push.apply(dep, this._array_dep);
                 ENGINES.get(this.engineid).eventManager.emit(this.name, dep);
+            } else {
+                var engine = ENGINES.get(this.engineid)
+                var eventJson = {
+                    process_type: engine.process_type,
+                    process_id: engine.process_instance,
+                    process_perspective: engine.process_perspective,
+                    stage_name: this.stage,
+                    timestamp: Date.now(),
+                    condition: newValue
+                }
+                EVENTR.publishLogEvent('condition', this.engineid, engine.process_type, engine.process_instance, eventJson)
             }
         }
     }
