@@ -1,3 +1,6 @@
+process.env.EGSM_COMPONENT_ID = 'worker';
+const performanceTracker = require('./modules/egsm-common/monitoring/performanceTracker');
+
 var fs = require('fs');
 
 var PRIM = require('./modules/egsm-common/auxiliary/primitives')
@@ -31,3 +34,12 @@ MQTTCOMM.initPrimaryBrokerConnection(broker).then((result) => {
 })
 
 egsmengine.setEventRouter(event_router.processPublish)
+
+process.on('SIGINT', () => {
+    LOG.logWorker('INFO', 'Shutting down worker...', module.id);
+    
+    // Export performance data
+    performanceTracker.exportToFile();
+    
+    process.exit(0);
+});

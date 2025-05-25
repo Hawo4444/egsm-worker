@@ -20,6 +20,8 @@ let ARTIFACTS = new Map() //ENGINE_ID -> [{ARTIFACT_NAME, BROKER, HOST, BINDING,
 let STAKEHOLDERS = new Map() //ENGINE_ID -> [{STAKEHOLDER_NAME, PROCESS_ID, BROKER, HOST}]
 
 const TOPIC_PROCESS_LIFECYCLE = 'process_lifecycle'
+const performanceTracker = require('../egsm-common/monitoring/performanceTracker');
+const ENGINE_CORRELATION_IDS = new Map();
 
 /**
  * Subscribe an engine specified by its ID to a topic at a specified broker
@@ -111,6 +113,9 @@ function deleteSubscription(engineid, topic, hostname, port) {
  */
 function publishLogEvent(type, engineid, processtype, processinstance, eventDetailsJson) {
     var topic = engineid
+    if (ENGINE_CORRELATION_IDS.has(engineid) && type === 'stage') {
+        eventDetailsJson.correlationId = ENGINE_CORRELATION_IDS.get(engineid);
+    }
     switch (type) {
         case 'stage':
             if (!VALIDATOR.validateStageLogMessage(eventDetailsJson)) {
@@ -138,6 +143,13 @@ function publishLogEvent(type, engineid, processtype, processinstance, eventDeta
         case 'adhoc':
             topic = topic + '/adhoc'
             break;
+    }
+    if (eventDetailsJson.correlationId) {
+        performanceTracker.recordEvent(eventDetailsJson.correlationId, 'worker_sent', {
+            type: type,
+            engineId: engineid,
+            topic: topic
+        });
     }
     mqtt.publishTopic(ENGINES.get(engineid).hostname, ENGINES.get(engineid).port, topic, JSON.stringify(eventDetailsJson))
 }
@@ -177,6 +189,26 @@ function onMessageReceived(hostname, port, topic, message) {
     var subscribers = SUBSCRIPTIONS.get(key)
     var msgJson = JSON.parse(message.toString())
 
+    let correlationId = null;
+    try {
+        if (msgJson.event && msgJson.event._correlationId) {
+            correlationId = msgJson.event._correlationId;
+        }
+
+        if (correlationId) {
+            performanceTracker.recordEvent(correlationId, 'worker_received', {
+                topic: topic,
+                hostname: hostname,
+                port: port
+            });
+            for (const engineId of subscribers) {
+                ENGINE_CORRELATION_IDS.set(engineId, correlationId);
+            }
+        }
+    } catch (err) {
+        LOG.logWorker('WARNING', `Could not extract correlation ID for tracking: ${err}`, module.id);
+    }
+
     for (var engine in subscribers) {
         var stakeholders = STAKEHOLDERS.get(subscribers[engine])
         var artifacts = ARTIFACTS.get(subscribers[engine])
@@ -214,7 +246,7 @@ function onMessageReceived(hostname, port, topic, message) {
                                         elements = engineid.split('/')
                                         var eventDetail = {
                                             artifact_name: artifacts[artifact].name + '/' + artifacts[artifact].id,
-                                            event_id: "event_" + UUID.v4(),
+                                            event_id: "corr_" + UUID.v4(),
                                             timestamp: Math.floor(Date.now() / 1000),
                                             artifact_state: 'detached',
                                             process_type: elements[0],
@@ -233,7 +265,7 @@ function onMessageReceived(hostname, port, topic, message) {
                                         elements = engineid.split('/')
                                         var eventDetail = {
                                             artifact_name: artifacts[artifact].name + '/' + artifacts[artifact].id,
-                                            event_id: "event_" + UUID.v4(),
+                                            event_id: "corr_" + UUID.v4(),
                                             timestamp: Math.floor(Date.now() / 1000),
                                             artifact_state: 'attached',
                                             process_type: elements[0],
@@ -257,7 +289,7 @@ function onMessageReceived(hostname, port, topic, message) {
                                         elements = engineid.split('/')
                                         var eventDetail = {
                                             artifact_name: artifacts[artifact].name + '/' + artifacts[artifact].id,
-                                            event_id: "event_" + UUID.v4(),
+                                            event_id: "corr_" + UUID.v4(),
                                             timestamp: Math.floor(Date.now() / 1000),
                                             artifact_state: 'detached',
                                             process_type: elements[0],
@@ -407,7 +439,3 @@ module.exports = {
     initConnections: initConnections,
     onEngineStop: onEngineStop,
 };
-
-
-
-
